@@ -1083,7 +1083,7 @@
 
 				clearTimeout(timeout);
 
-				// Пытаемся распарсить JSON в любом случае
+				// Пытаемся распарсить JSON
 				let payload = null;
 				try {
 					payload = await response.json();
@@ -1091,14 +1091,33 @@
 					payload = null;
 				}
 
-				if (!response.ok || !payload || payload.success !== true) {
-					// Ошибка сервера или success: false
-					const msg =
-						(payload && (payload.error || payload.message)) ||
-						"Не удалось получить данные. Проверьте ссылку и попробуйте снова.";
+				// 1. ПРОВЕРЯЕМ СБОЙ СЕРВЕРА И ВЫТАСКИВАЕМ ДЕТАЛЬНУЮ ОШИБКУ ОТ FASTAPI
+				if (!response.ok) {
 					haptic("heavy");
 					setLoading(false);
-					showAlert(msg);
+					
+					// Если бэкэнд прислал {"detail": "..."}, выводим его, иначе пишем код HTTP ошибки
+					const errorDetail = payload && payload.detail ? payload.detail : `Ошибка сервера (Код: ${response.status})`;
+					
+					showAlert(
+						`🚨 Ошибка бэкэнда FastAPI\n\n` +
+						`Причина: ${errorDetail}\n\n` +
+						`Проверьте логи в панели Hugging Face Spaces.`
+					);
+					return;
+				}
+
+				// 2. ПРОВЕРЯЕМ ВНУТРЕННИЙ СБОЙ ТВОЕГО ПАРСЕРА (success !== true)
+				if (!payload || payload.success !== true) {
+					const msg = (payload && (payload.error || payload.message)) || "Неизвестная ошибка парсера Getgems";
+					haptic("heavy");
+					setLoading(false);
+					
+					showAlert(
+						`🚨 Ошибка парсинга NFT\n\n` +
+						`Причина: ${msg}\n\n` +
+						`Убедитесь, что предмет существует и ссылка верна.`
+					);
 					return;
 				}
 
@@ -1107,21 +1126,22 @@
 				setLoading(false);
 				renderResult(payload);
 				addToHistory(value, payload);
+				
 			} catch (error) {
 				clearTimeout(timeout);
-				// Ошибка сети / таймаут / abort
 				haptic("heavy");
 				setLoading(false);
-				const netMsg =
-					error && error.name === "AbortError"
-						? "Превышено время ожидания ответа сервера. Попробуйте позже."
-						: "Ошибка сети. Проверьте подключение к интернету и попробуйте снова.";
-				showAlert(netMsg);
-			} finally {
-				isFetching = false;
-				analyzeBtn.disabled = false;
+				
+				if (error && error.name === "AbortError") {
+					showAlert("⏳ Превышено время ожидания ответа сервера. Попробуйте позже.");
+				} else {
+					showAlert(
+						`🌐 Ошибка сети\n\n` +
+						`Причина: ${error.message || "Не удалось достучаться до сервера."}\n\n` +
+						`Проверьте подключение к интернету или статус Running на Hugging Face.`
+					);
+				}
 			}
-		}
 
 		/* ============================================================
 		   ОБРАБОТЧИКИ СОБЫТИЙ
@@ -1145,29 +1165,16 @@
 
 		analyzeBtn.addEventListener("click", analyze);
 
-		// Клик по нативной MainButton тоже запускает анализ (на случай, если используется)
+		// Клик по нативной MainButton тоже запускает анализ
 		try {
 			if (tg && tg.MainButton) {
 				tg.MainButton.onClick(function () {
 					if (!isFetching) analyze();
 				});
 			}
-		} catch (error) {
-				clearTimeout(timeout);
-				haptic("heavy");
-				setLoading(false);
-				
-				// Проверяем, произошел ли таймаут на стороне фронтенда
-				if (error && error.name === "AbortError") {
-					showAlert("⏳ Превышено время ожидания ответа сервера. Попробуйте позже.");
-				} else {
-					// Выводим подробный текст ошибки, прилетевший из блока try
-					showAlert(
-						`🚨 Сбой при анализе NFT\n\n` +
-						`Причина: ${error.message}\n\n` +
-						`Проверьте ссылку или статус сервера на Hugging Face.`
-					);
-				}
+		} catch (e) {
+			console.error("MainButton error:", e);
+		}
 
 
 		/* ============================================================
